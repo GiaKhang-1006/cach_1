@@ -371,6 +371,70 @@ def train(save_path, length, num, words, feature_dim):
 #         print('[Evaluate Phase] MAP: %.2f%% top_k: %.2f%%' % (100. * float(mAP), 100. * float(top_k)))
 
 
+# def test(load_path, length, num, words, feature_dim):
+#     len_bit = int(num * math.log(words, 2))
+#     assert length == len_bit, "something went wrong with code length"
+
+#     d = int(feature_dim / num)
+#     matrix = torch.randn(d, d)
+#     for k in range(d):
+#         for j in range(d):
+#             matrix[j, k] = math.cos((j+0.5)*k*math.pi/d)
+#     matrix[:, 0] /= math.sqrt(2)    # divided by sqrt(2)
+#     matrix /= math.sqrt(d/2)    # divided by sqrt(N/2)
+#     code_books = torch.Tensor(num, d, words)
+#     code_books[0] = matrix[:, :words]
+#     for i in range(1, num):
+#         code_books[i] = matrix @ code_books[i-1]
+
+#     print("===============evaluation on model %s===============" % load_path)
+
+#     # Chọn backbone dựa trên args.backbone
+#     if args.backbone == 'edgeface':
+#         net = EdgeFaceBackbone(feature_dim=feature_dim)
+#     else:
+#         if args.cross_dataset:
+#             net = resnet20_pq(num_layers=20, feature_dim=feature_dim)
+#         else:
+#             if args.dataset in ["facescrub", "cfw", "youtube"]:
+#                 net = resnet20_pq(num_layers=20, feature_dim=feature_dim, channel_max=512, size=4)
+#             else:
+#                 net = resnet20_pq(num_layers=20, feature_dim=feature_dim)
+
+#     train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.bs, shuffle=False, num_workers=4)
+#     test_loader = torch.utils.data.DataLoader(testset, batch_size=args.bs, shuffle=False, num_workers=4)
+#     num_classes = len(trainset.classes)
+#     num_classes_test = len(testset.classes)
+#     print("number of train identities: ", num_classes)
+#     print("number of test identities: ", num_classes_test)
+#     print("number of training images: ", len(trainset))
+#     print("number of test images: ", len(testset))
+#     print("number of training batches per epoch:", len(train_loader))
+#     print("number of testing batches per epoch:", len(test_loader))
+
+#     device = "cuda:0" if torch.cuda.is_available() else "cpu"
+#     net = nn.DataParallel(net).to(device)
+
+#     checkpoint_dir = '/kaggle/working/opqn-0210/checkpoint/' if 'kaggle' in os.environ.get('PWD', '') else 'checkpoint'
+#     checkpoint = torch.load(os.path.join(checkpoint_dir, load_path))
+#     net.load_state_dict(checkpoint['backbone'])
+#     mlp_weight = checkpoint['mlp']
+#     len_word = int(feature_dim / num)
+#     net.eval()
+#     with torch.no_grad():
+#         index, train_labels = compute_quant_indexing(transform_test, train_loader, net, len_word, mlp_weight, device)
+#         start = time.perf_counter()
+#         query_features, test_labels = compute_quant(transform_test, test_loader, net, device)
+#         top_k_value = 5 if args.dataset != "vggface2" else 10
+#         mAP, top_k = PqDistRet_Ortho(query_features, test_labels, train_labels, index, mlp_weight, len_word, num, device, top=top_k_value)
+#         time_elapsed = time.perf_counter() - start
+#         ms_per_query = (time_elapsed * 1000) / len(testset)  # ms/query
+
+#         print("Query completed in %d ms" % int(time_elapsed * 1000))
+#         print("Average query speed: %.4f ms/query" % ms_per_query)
+#         print('[Evaluate Phase] MAP: %.2f%% top_k: %.2f%%' % (100. * float(mAP), 100. * float(top_k)))
+
+#Test 10->100
 def test(load_path, length, num, words, feature_dim):
     len_bit = int(num * math.log(words, 2))
     assert length == len_bit, "something went wrong with code length"
@@ -425,16 +489,18 @@ def test(load_path, length, num, words, feature_dim):
         index, train_labels = compute_quant_indexing(transform_test, train_loader, net, len_word, mlp_weight, device)
         start = time.perf_counter()
         query_features, test_labels = compute_quant(transform_test, test_loader, net, device)
-        top_k_value = 5 if args.dataset != "vggface2" else 10
-        mAP, top_k = PqDistRet_Ortho(query_features, test_labels, train_labels, index, mlp_weight, len_word, num, device, top=top_k_value)
+        # Tính mAP một lần (không phụ thuộc vào k)
+        mAP, _ = PqDistRet_Ortho(query_features, test_labels, train_labels, index, mlp_weight, len_word, num, device, top=len(trainset))
+        print('[Evaluate Phase] MAP: %.2f%%' % (100. * float(mAP)))
+        # Vòng lặp cho top-k từ 10 đến 100, step 10, chỉ tính top-k accuracy
+        for k in range(10, 101, 10):
+            _, top_k = PqDistRet_Ortho(query_features, test_labels, train_labels, index, mlp_weight, len_word, num, device, top=k)
+            print('[Evaluate Phase @ top-%d] top_k: %.2f%%' % (k, 100. * float(top_k)))
         time_elapsed = time.perf_counter() - start
         ms_per_query = (time_elapsed * 1000) / len(testset)  # ms/query
 
         print("Query completed in %d ms" % int(time_elapsed * 1000))
         print("Average query speed: %.4f ms/query" % ms_per_query)
-        print('[Evaluate Phase] MAP: %.2f%% top_k: %.2f%%' % (100. * float(mAP), 100. * float(top_k)))
-
-
 
 if __name__ == "__main__":
     save_dir = 'log'
